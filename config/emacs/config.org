@@ -1,0 +1,50 @@
+#+title: My Emacs Configuration
+
+** Starter Configuration
+#+begin_src elisp
+  (menu-bar-mode 0)
+  (tool-bar-mode 0)
+  (scroll-bar-mode 0)
+  (tooltip-mode 0)
+  (blink-cursor-mode 0)
+  (fido-vertical-mode 1)
+
+  (setopt use-short-answers t)
+  ;; (setopt ring-bell-function 'ignore)
+  ;; (add-hook 'prog-mode-hook 'display-line-numbers-mode)
+#+end_src
+
+** Package Management
+#+begin_src elisp
+  (require 'package)
+  (add-to-list 'package-archives '("melpa" . "https://melpa.org/packages/"))
+
+  ;; Activate already installed packages
+  (package-initialize)
+
+  (unless package-archive-contents (package-refresh-contents))
+
+  (unless (package-installed-p 'use-package) (package-install 'use-package))
+  (require 'use-package)
+
+  (setopt use-package-always-ensure t)
+#+end_src
+
+** Packages
+#+begin_src elisp
+  (use-package kaolin-themes :config (load-theme 'kaolin-aurora t))
+  (use-package rainbow-delimiters :hook (prog-mode . rainbow-delimiters-mode))
+
+  (setopt custom-file (concat user-emacs-directory "custom.el"))
+  (when (file-exists-p custom-file) (load custom-file))
+
+  (which-key-mode 1)
+  (use-package marginalia :init (marginalia-mode 1))
+#+end_src
+
+** Org Mode
+#+begin_src elisp
+  (use-package org-modern
+    :hook (org-mode . org-modern-mode)
+    :custom (org-mode-star 2))
+#+end_src
