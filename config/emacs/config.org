@@ -7,7 +7,9 @@
   (scroll-bar-mode 0)
   (tooltip-mode 0)
   (blink-cursor-mode 0)
+  
   (fido-vertical-mode 1)
+  (which-key-mode 1)
 
   (setopt use-short-answers t)
   ;; (setopt ring-bell-function 'ignore)
@@ -18,7 +20,6 @@
 #+begin_src elisp
   (require 'package)
   (add-to-list 'package-archives '("melpa" . "https://melpa.org/packages/"))
-
   ;; Activate already installed packages
   (package-initialize)
 
@@ -30,21 +31,288 @@
   (setopt use-package-always-ensure t)
 #+end_src
 
-** Packages
+** File Management
 #+begin_src elisp
-  (use-package kaolin-themes :config (load-theme 'kaolin-aurora t))
-  (use-package rainbow-delimiters :hook (prog-mode . rainbow-delimiters-mode))
-
-  (setopt custom-file (concat user-emacs-directory "custom.el"))
+  (setopt
+    auto-save-timeout 60
+    auto-save-default nil
+    ;; make-backup-files nil
+    backup-directory-alist `(("." . ,(expand-file-name "tmp/backups/" user-emacs-directory)))
+    custom-file (concat user-emacs-directory "custom.el"))
   (when (file-exists-p custom-file) (load custom-file))
+#+end_src
 
-  (which-key-mode 1)
+** Enhance Quality
+#+begin_src elisp
+  (setopt scroll-conservatively 101) ; Smooth scrolling
+
+  ;; Theme
+  (use-package kaolin-themes :config (load-theme 'kaolin-aurora t))
+
   (use-package marginalia :init (marginalia-mode 1))
+  (use-package rainbow-delimiters :hook (prog-mode . rainbow-delimiters-mode))
+  (use-package olivetti 
+    :custom (olivetti-body-width 80) 
+    :hook ((org-mode . olivetti-mode)
+           (org-agenda-mode . olivetti-mode)))
+  (use-package colorful-mode 
+    :custom (colorful-use-prefix t)
+    (colorful-only-strings 'only-prog)
+    :config (global-colorful-mode t))
 #+end_src
 
 ** Org Mode
 #+begin_src elisp
+  (use-package org :ensure nil :custom
+    (org-directory "~/org")
+    (org-log-done 'time)
+    (org-log-into-drawer t)
+    (org-capture-templates
+     '(("t" "tasks" entry (file "~/org/inbox.org") "* TODO %?\n %U\n")
+       ("j" "journal" entry
+        (file+olp+datetree "~/org/journal.org") :empty-lines 1)))
+    :config (keymap-global-set "C-c c" #'org-capture))
+#+end_src
+
+*** Org Modern/Style
+#+begin_src elisp
+  (require 'org-tempo)
+
   (use-package org-modern
-    :hook (org-mode . org-modern-mode)
-    :custom (org-mode-star 2))
+    :custom (org-modern-star 2) (org-modern-table-vertical 1)
+    :hook ((org-mode . org-modern-mode)
+  	 (org-agenda-finalize . org-modern-agenda)))
+
+  (use-package org-appear :hook (org-mode . org-appear-mode))
+#+end_src
+
+** Keybindings
+
+*** My Text Editing Rules
+#+begin_comment
+1. Utilize =meow-*-of-thing= commands for specific selection.
+2. For manual selection use =set-mark-command= + movement or =flash-jump= for wider regions.
+3. Delete > Kill, because *kill* occupies the =kill-ring=.
+4. Utilize =meow-grab= and =meow-swap=
+   * In replacement of kill and yank.
+   * In replacement of move text in traffic.
+   * Use even if it's in another buffer.
+5. Use =sync-grab= for duplicating/replace a beacon selection to another.
+#+end_comment
+
+*** Flash
+#+begin_src elisp
+  (use-package flash
+    :config (flash-isearch-mode)
+    :custom (flash-multi-window t))
+#+end_src
+
+*** Helper Functions
+#+begin_src elisp
+  (defun z/jk-insert-exit()
+    "Switch to NORMAL state by quickly typing jk."
+    (interactive)
+    (let ((event (read-event nil nil 0.2)))
+      (if (equal event ?k) (meow-insert-exit)
+        (progn (insert "j") (when event (push event unread-command-events)))))
+    (message "Back to NORMAL state"))
+
+  (defun my-word-bounds() (bounds-of-thing-at-point 'word))
+  (defun z/act-on-thing(fn)
+    "Apply FN to region/word/char."
+    (cond ((use-region-p) (funcall fn (region-beginning) (region-end)))
+  	((my-word-bounds)
+  	 (let ((b (car (my-word-bounds)))
+  	       (e (cdr (my-word-bounds))))
+  	   (funcall fn b e)))
+  	((char-after) (funcall fn (point) (1+ (point))))))
+#+end_src
+*** Smart Helpers for NORMAL state
+#+begin_src elisp
+  ;; Smart helpers
+  (defun z/smart-delete()
+    "Delete active region, word, or char at point."
+    (interactive) (z/act-on-thing #'delete-region))
+  (defun z/smart-change()
+    "Change active region, word, or char at point."
+    (interactive) (z/smart-delete) (meow-insert))
+  (defun z/smart-yank()
+    "Yank active region, word, or char at point."
+    (interactive) (z/act-on-thing #'copy-region-as-kill))
+  (defun z/smart-kill()
+    "Kill active region, word, or char at point."
+    (interactive) (z/smart-delete) (yank)) ; (z/act-on-thing) #'meow-replace
+  (defun z/smart-replace()
+    "Replace active region, word, or char at point with yank."
+    (interactive) (z/smart-delete) (yank)) ; (z/act-on-thing #'meow-replace
+#+end_src
+
+#+begin_src elisp
+  (defun z/delete-comment(arg)
+    "Delete the first comment on this line, if any."
+    (interactive "p")
+    (let ((kill-ring kill-ring)) (kill-comment arg))
+    (message "Comment deleted!"))
+
+  ;; For Leader Keys
+  (defun z/kill-current-buffer()
+    "Kill current active buffer dwim."
+    (interactive)
+    (kill-buffer (current-buffer))
+    (message "Current buffer killed!"))
+#+end_src
+
+*** Modal: Meow
+#+begin_src elisp
+  (use-package meow :custom
+    (meow-display-thing-help nil)
+    (meow-char-thing-table
+     '((?s  . symbol)
+       (?\" . string)
+       (?l  . line)
+       (?f  . defun)
+       (?S  . sentence)
+       (?p  . paragraph)
+       (?b  . buffer)
+       (?\( . round)  (?\) . round)
+       (?\[ . square) (?\] . square)
+       (?\{ . curly)  (?\} . curly)
+       ;; Registered
+       (?w . word)
+       (?u . url)
+       (?\' . quoted)
+       (?\< . arrow) (?\> . arrow)
+       (?d . do/end) (?e . do/end)))
+
+    :config
+    (meow-thing-register 'word 'word 'word)
+    (meow-thing-register 'url 'url 'url)
+    (meow-thing-register 'arrow '(pair ("<") (">")) '(pair ("<") (">")))
+    (meow-thing-register 'do/end '(pair ("do") ("end")) '(pair ("do") ("end")))
+
+    (meow-define-keys 'insert '("j" . z/jk-insert-exit))
+    (meow-motion-define-key
+     '("j" . meow-next)
+     '("k" . meow-prev)
+     '("<escape>" . ignore))
+    
+    (meow-normal-define-key
+     '("f" . flash-jump)
+     
+     '("h" . left-char)
+     '("j" . next-line)
+     '("k" . previous-line)
+     '("l" . right-char)
+
+     '("w" . forward-word)
+     '("W" . meow-next-word)
+     '("b" . backward-word)
+     '("B" . meow-back-word)
+
+     '(";" . meow-reverse)
+     '("-" . negative-argument)
+     '("x" . meow-line)
+
+     '("1" . meow-expand-1)
+     '("2" . meow-expand-2)
+     '("3" . meow-expand-3)
+     '("4" . meow-expand-4)
+     '("5" . meow-expand-5)
+     '("6" . meow-expand-6)
+     '("7" . meow-expand-7)
+     '("8" . meow-expand-8)
+     '("9" . meow-expand-9)
+     '("0" . meow-expand-0)
+
+     '("m"   . meow-inner-of-thing)
+     '("M"   . meow-bounds-of-thing)
+     '("M-m" . meow-end-of-thing)
+     '("M-M" . meow-beginning-of-thing)
+
+     '("d" . z/smart-delete)
+     '("D" . delete-char)
+     '("c" . z/smart-change)
+     '("C" . (lambda(arg) (interactive "p") (delete-char arg) (meow-insert)))
+     '("K" . z/smart-kill)
+     '("r" . z/smart-replace)
+
+     '("J" . join-line)
+     '("M-d" . duplicate-dwim)
+
+     ;; Grab Selection
+     '("g" . meow-grab)
+     '("G" . meow-pop-grab)
+     '("S" . meow-sync-grab)
+     '("s" . meow-swap-grab)
+     
+     '("i" . meow-insert)
+     '("a" . (lambda() (interactive) (meow-insert) (meow-right)))
+     '("A" . (lambda() (interactive) (meow-insert) (end-of-line)))
+     '("I" . (lambda() (interactive) (beginning-of-line-text) (meow-insert)))
+     '("O" . meow-open-above)
+     '("o" . meow-open-below)
+
+     '(":" . meow-goto-line)
+     '("%" . meow-query-replace)
+     '("&" . meow-query-replace-regexp)
+
+     '("/b" . comment-box)
+     '("/d" . z/delete-comment)
+     '("/k" . kill-comment)
+     '("//" . comment-line)
+
+     '("." . meow-find-ref))
+
+    (meow-leader-define-key
+     '("SPC" . meow-last-buffer)
+     '("k" . z/kill-current-buffer)
+     
+     ;; Register
+     '("." . point-to-register)
+     '("j" . jump-to-register)
+     ;; Bookmark
+     '("bb" . bookmark-set)
+     '("J"  . bookmark-jump)
+     '("bm" . bookmark-bmenu-list)
+
+     ;; Files
+     '("R" . recentf)
+     '("f" . find-file)
+     '("M-f" . find-file-read-only)
+
+     ;; Explorer
+     '("d" . dired-jump)
+
+     ;; Insert Text
+     '("ic" . insert-char)
+     '("ir" . insert-register)
+     '("if" . insert-file)
+     '("ib" . insert-buffer)
+
+     ;; Append
+     '("af" . append-to-file)
+     '("ar" . increment-register)
+     '("ab" . append-to-buffer)
+
+     ;; LSP
+     '("xr" . xref-find-references)
+     '("xd" . xref-find-definitions)
+     '("x," . xref-go-back)
+     '("x." . xref-go-forward)
+
+     '("oa" . org-agenda)
+     '("oc" . org-capture)
+
+     ;; Org roam
+     '("nf" . org-roam-node-find)
+     '("na" . org-roam-alias-add)
+     '("ni" . org-roam-node-insert)
+
+     ;; Project
+     '("pf" . project-find-file)
+     '("pe" . project-eshell)
+     '("p&" . project-async-shell-command)
+     '("pd" . project-dired)
+     '("pc" . project-compile))
+    (meow-global-mode))
 #+end_src
